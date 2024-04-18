@@ -1,22 +1,43 @@
 #include <stdlib.h>
+#include <sys/_pthread/_pthread_mutex_t.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <assert.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <stdatomic.h>
 
 #define NBUCKET 5
 #define NKEYS 100000
+
+
+
+
 
 struct entry {
   int key;
   int value;
   struct entry *next;
-};
-struct entry *table[NBUCKET];
+} ;
+
+struct  bucket {
+  struct entry *next;
+  pthread_mutex_t lock;     
+}  ;
+
+struct bucket table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
+
+static 
+void
+init_table(){
+  for (int i =0; i < NBUCKET;i++){
+      pthread_mutex_init(&table[i].lock, NULL); 
+  }
+
+}
 
 double
 now()
@@ -36,14 +57,18 @@ insert(int key, int value, struct entry **p, struct entry *n)
   *p = e;
 }
 
+
 static 
 void put(int key, int value)
 {
   int i = key % NBUCKET;
 
+  //lock the bucket
+  pthread_mutex_lock(&table[i].lock);      
+
   // is the key already present?
   struct entry *e = 0;
-  for (e = table[i]; e != 0; e = e->next) {
+  for (e = table[i].next; e != 0; e = e->next) {
     if (e->key == key)
       break;
   }
@@ -52,8 +77,9 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
-    insert(key, value, &table[i], table[i]);
+    insert(key, value, &table[i].next, table[i].next);
   }
+  pthread_mutex_unlock(&table[i].lock);    
 
 }
 
@@ -62,11 +88,14 @@ get(int key)
 {
   int i = key % NBUCKET;
 
+  //lock the bucket
+  pthread_mutex_lock(&table[i].lock);   
 
   struct entry *e = 0;
-  for (e = table[i]; e != 0; e = e->next) {
+  for (e = table[i].next; e != 0; e = e->next) {
     if (e->key == key) break;
   }
+  pthread_mutex_unlock(&table[i].lock);
 
   return e;
 }
@@ -117,6 +146,8 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+
+  init_table();
 
   //
   // first the puts
